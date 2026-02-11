@@ -1,0 +1,24 @@
+import pandas as pd
+from pathlib import Path
+
+# 1. SETUP PATHS
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent
+CSV_PATH = PROJECT_ROOT / "data" / "LinkedIn" / "postings.csv"
+
+# 2. LOAD DATA
+# We only load the columns we used as metadata
+cols_to_profile = ['title', 'location', 'company_name', 'formatted_experience_level', 'work_type']
+df = pd.read_csv(CSV_PATH, usecols=cols_to_profile).fillna("UNKNOWN")
+
+# 3. GENERATE REPORT
+print("=== METADATA PROFILE REPORT ===\n")
+
+for col in cols_to_profile:
+    print(f"--- Top 100 Unique Values for: {col} ---")
+    # value_counts() automatically sorts by most frequent
+    counts = df[col].value_counts().head(100)
+    
+    for val, count in counts.items():
+        print(f"[{count:>5}] {val}")
+    print("\n" + "="*40 + "\n")
