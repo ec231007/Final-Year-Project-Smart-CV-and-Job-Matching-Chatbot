@@ -1,3 +1,5 @@
 venv/
 data/
 .env
+scripts/metadata_cache.json
+scripts/__pycache__/
