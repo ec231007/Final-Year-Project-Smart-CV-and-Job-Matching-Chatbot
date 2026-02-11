@@ -37,7 +37,7 @@ def get_filter_json(user_prompt):
     return json.loads(response.choices[0].message.content)
 
 # Test it
-print(get_filter_json("I want on-site junior roles in New York"))
+#print(get_filter_json("I want on-site junior roles in New York"))
 
 def explain_matches(user_resume_text, job_results):
     # job_results comes from collection.query()
