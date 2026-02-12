@@ -29,27 +29,33 @@ def get_fuzzy_locations(user_loc):
 
 # 3. THE SMART SEARCH PIPELINE
 def smart_search_with_file(file_path, additional_query=""):
+    """
+    Run the smart search pipeline on a resume file plus an optional free-text query.
+    Returns a tuple of (results_dict_or_None, intent_dict).
+    """
     # STEP A: Extract Resume Text
     print(f"Processing: {os.path.basename(file_path)}")
+    print(additional_query)
     resume_text = extract_text_from_file(file_path)
-    
+
     # STEP B: Get Intent via Groq
     # We pass both the resume (for skills) and query (for specific filters)
     combined_input = f"RESUME: {resume_text[:2000]}\nUSER PREFERENCES: {additional_query}"
     intent = get_filter_json(combined_input)
-    
+    print(f"Extracted Intent: {intent}")
+
     # STEP C: Build Chroma Filter using Cache
     where_clauses = []
-    
+
     # Standard exact filters
-    if intent.get('experience'):
-        where_clauses.append({"experience": intent['experience']})
-    if intent.get('work_type'):
-        where_clauses.append({"work_type": intent['work_type']})
-    
+    if intent.get("experience"):
+        where_clauses.append({"experience": intent["experience"]})
+    if intent.get("work_type"):
+        where_clauses.append({"work_type": intent["work_type"]})
+
     # Fuzzy Location Expansion (Matches user "NYC" to "New York, NY" from cache)
-    if intent.get('location'):
-        loc_variations = get_fuzzy_locations(intent['location'])
+    if intent.get("location"):
+        loc_variations = get_fuzzy_locations(intent["location"])
         if loc_variations:
             where_clauses.append({"location": {"$in": loc_variations}})
 
@@ -61,28 +67,34 @@ def smart_search_with_file(file_path, additional_query=""):
         final_where = where_clauses[0]
 
     # STEP D: Query Database
-    search_term = intent.get('title') or additional_query or "Job Opportunity"
+    search_term = intent.get("title") or additional_query or "Job Opportunity"
     results = collection.query(
         query_texts=[search_term],
         n_results=5,
-        where=final_where
+        where=final_where,
     )
 
-    # STEP E: Output Results
+    # STEP E: Output Results (for debugging / CLI use)
     print(f"\n{'='*60}\n🔍 MATCHES FOR YOUR PROFILE\n{'='*60}")
-    if not results['ids'][0]:
+    if not results["ids"][0]:
         print("No matches found with these filters. Try broader criteria.")
-        return
+        # Still return the intent so the caller can surface it in the UI
+        return None, intent
 
-    for i in range(len(results['ids'][0])):
-        meta = results['metadatas'][0][i]
-        score = round((1 - results['distances'][0][i]) * 100, 2)
-        
+    for i in range(len(results["ids"][0])):
+        meta = results["metadatas"][0][i]
+        score = round((1 - results["distances"][0][i]) * 100, 2)
+
         print(f"[{i+1}] {meta['title'].upper()} @ {meta['company']}")
         print(f"    📍 {meta['location']} | {meta['work_type']} | Match: {score}%")
         print(f"    📝 {results['documents'][0][i][:160]}...\n")
 
-# 4. RUN IT
-# Example: Pass a PDF/Doc and a specific location constraint
-test_file = r"C:\Vasanth\Important stuff\Resumes\Vasanth Subramanian Resume.pdf" 
-smart_search_with_file(test_file, "Software Engineer in New York")
+    # Return both the raw results and the parsed intent for use in the frontend
+    return results, intent
+
+
+# 4. OPTIONAL: CLI TEST ENTRYPOINT
+if __name__ == "__main__":
+    # Example: Pass a PDF/Doc and a specific location constraint
+    test_file = r"C:\Vasanth\Important stuff\Resumes\Vasanth Subramanian Resume.pdf"
+    smart_search_with_file(test_file, "Software Engineer in New York")
