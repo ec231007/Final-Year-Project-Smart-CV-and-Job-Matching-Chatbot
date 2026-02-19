@@ -36,8 +36,34 @@ def get_filter_json(user_prompt):
     )
     return json.loads(response.choices[0].message.content)
 
-# Test it
-#print(get_filter_json("I want on-site junior roles in New York"))
+def get_search_query_llm(resume_text, user_query=""):
+    """
+    Summarizes a CV and user intent into a condensed string of 
+    searchable keywords for Vector DB retrieval.
+    """
+    system_prompt = """
+    You are a Recruitment Search Expert. 
+    Analyze the provided CV text and the user's specific request.
+    Generate a condensed 20-30 word search query string that captures:
+    1. The core job title/role.
+    2. Primary technical skills (languages, frameworks, tools).
+    3. Core industries or domain expertise (e.g., Fintech, AI, Backend).
+    
+    Output ONLY the string of keywords, no introduction or JSON.
+    Example Output: "Senior Python Developer AWS Docker Kubernetes Distributed Systems Fintech Scalability"
+    """
+    
+    prompt = f"RESUME: {resume_text[:2500]}\nUSER REQUEST: {user_query}"
+    
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.1 # Low temperature for consistency
+    )
+    return response.choices[0].message.content.strip()
 
 def explain_matches(user_resume_text, job_results):
     # job_results comes from collection.query()

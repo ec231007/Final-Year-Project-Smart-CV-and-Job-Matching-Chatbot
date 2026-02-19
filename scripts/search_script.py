@@ -2,7 +2,7 @@ import json
 import os
 import chromadb
 from chromadb.utils import embedding_functions
-from groq_prompter import get_filter_json
+from groq_prompter import get_filter_json, get_search_query_llm
 from resume_parser_util import extract_text_from_file
 from resume_ner_bert import parse_resume_ner_bert as parse_resume_ner
 
@@ -29,7 +29,7 @@ def get_fuzzy_locations(user_loc):
     return [loc for loc in UNIQUE_LOCATIONS if user_loc.lower() in loc.lower()]
 
 # 3. THE SMART SEARCH PIPELINE
-def smart_search_with_file(file_path, additional_query="", NER_applied=False):
+def smart_search_with_file(file_path, additional_query="", NER_applied=True, LLM_applied=True):
     """
     Run the smart search pipeline on a resume file plus an optional free-text query.
     Returns a tuple of (results_dict_or_None, intent_dict).
@@ -38,18 +38,6 @@ def smart_search_with_file(file_path, additional_query="", NER_applied=False):
     print(f"Processing: {os.path.basename(file_path)}")
     print(additional_query)
     resume_text = extract_text_from_file(file_path)
-
-    roles, skills, education, locations = [], [], [], []
-    if NER_applied:
-        # Retrieve the NER output from the resume
-        ner_output = parse_resume_ner(resume_text)
-        print(f"NER Output: {ner_output}")
-
-        # Extract relevant information from the NER output
-        roles = [s for s in ner_output.get("roles", []) if len(s) > 2]
-        skills = [s for s in ner_output.get("skills", []) if len(s) > 2]
-        education = [s for s in ner_output.get("education", []) if len(s) > 2]
-        locations = [s for s in ner_output.get("locations", []) if len(s) > 2]
 
     # STEP B: Get Intent via Groq
     # We pass both the resume (for skills) and query (for specific filters)
@@ -79,22 +67,35 @@ def smart_search_with_file(file_path, additional_query="", NER_applied=False):
     elif len(where_clauses) == 1:
         final_where = where_clauses[0]
 
-    # STEP D: Build the "Soft" Query String (The "Nice-to-Haves")
-    # We combine the job title with the NER skills to "boost" relevant jobs
+    # STEP D: Build the "Rich Query" (The Booster Logic)
+    # 1. Start with the basic title or user query
     base_query = intent.get("title") or additional_query or ""
     
+    boost_parts = [base_query]
+
+    # 2. Add LLM Semantic Summary (High Level Reasoning)
+    if LLM_applied:
+        llm_query = get_search_query_llm(resume_text, additional_query)
+        boost_parts.append(llm_query)
+        print(f"🤖 LLM Boost: {llm_query}")
+
+    # 3. Add NER Tags (Granular Keywords)
     if NER_applied:
-        # Boost string: "Software Engineer Python Java Machine Learning"
-        ner_boost = " ".join(roles + skills+ education+ locations)
-        rich_query = f"{base_query} {ner_boost}"
-    else:
-        rich_query = base_query
+        ner_output = parse_resume_ner(resume_text)
+        # Extract and clean tags longer than 2 chars
+        ner_tags = [s for k in ner_output for s in ner_output[k] if len(s) > 2]
+        if ner_tags:
+            boost_parts.append(" ".join(ner_tags))
+            print(f"🏷️ NER Boost: {len(ner_tags)} tags added.")
+
+    # Join everything into one big semantic string
+    rich_query = " ".join(boost_parts)
 
     # STEP E: Query Database
     results = collection.query(
-        query_texts=[rich_query], # The semantic engine handles the "weight"
+        query_texts=[rich_query],
         n_results=5,
-        where=final_where, # Hard filters only for location/exp
+        where=final_where,
     )
 
     # STEP E: Output Results (for debugging / CLI use)
@@ -120,5 +121,5 @@ def smart_search_with_file(file_path, additional_query="", NER_applied=False):
 if __name__ == "__main__":
     # Example: Pass a PDF/Doc and a specific location constraint
     test_file = r"C:\Vasanth\Important stuff\Resumes\Vasanth Subramanian Resume.pdf"
-    smart_search_with_file(test_file, "Software Engineer in New York", NER_applied=False)
-    smart_search_with_file(test_file, "Software Engineer in New York", NER_applied=True)
+    smart_search_with_file(test_file, "Software Engineer in New York", NER_applied=False, LLM_applied=False)
+    smart_search_with_file(test_file, "Software Engineer in New York", NER_applied=True, LLM_applied=True)
