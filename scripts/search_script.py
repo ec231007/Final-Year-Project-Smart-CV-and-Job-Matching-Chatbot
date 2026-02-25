@@ -113,8 +113,16 @@ def smart_search_with_file(file_path, additional_query="", NER_applied=True, LLM
         print(f"    📍 {meta['location']} | {meta['work_type']} | Match: {score}%")
         print(f"    📝 {results['documents'][0][i][:160]}...\n")
 
+    search_context = {
+        "intent": intent,
+        "ner_tags": ner_tags if NER_applied else None,
+        "llm_boost_query": llm_query if LLM_applied else None,
+        "final_filters": final_where,
+        "raw_resume_text": resume_text[:2000]
+    }
+
     # Return both the raw results and the parsed intent for use in the frontend
-    return results, intent
+    return results, search_context
 
 
 # 4. OPTIONAL: CLI TEST ENTRYPOINT

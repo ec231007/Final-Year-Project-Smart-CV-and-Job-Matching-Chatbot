@@ -48,7 +48,11 @@ def get_search_query_llm(resume_text, user_query=""):
     1. The core job title/role.
     2. Primary technical skills (languages, frameworks, tools).
     3. Core industries or domain expertise (e.g., Fintech, AI, Backend).
-    
+
+    Edge cases:
+    1. If the user query is empty/ not useful, build query from resume text.
+    2. If both resume test and user query are empty/ not useful, return empty string "".
+
     Output ONLY the string of keywords, no introduction or JSON.
     Example Output: "Senior Python Developer AWS Docker Kubernetes Distributed Systems Fintech Scalability"
     """
@@ -64,21 +68,3 @@ def get_search_query_llm(resume_text, user_query=""):
         temperature=0.1 # Low temperature for consistency
     )
     return response.choices[0].message.content.strip()
-
-def explain_matches(user_resume_text, job_results):
-    # job_results comes from collection.query()
-    
-    prompt = f"""
-    Compare this candidate's Resume to these Job Results.
-    Explain WHY they matched and what they are missing for the top match.
-    
-    RESUME: {user_resume_text[:2000]} # Truncate to save tokens
-    
-    JOBS FOUND: {job_results['documents'][0]}
-    """
-    
-    response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[{"role": "user", "content": prompt}]
-    )
-    return response.choices[0].message.content
