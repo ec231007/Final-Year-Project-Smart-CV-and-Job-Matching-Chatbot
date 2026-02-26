@@ -29,23 +29,19 @@ def get_fuzzy_locations(user_loc):
     return [loc for loc in UNIQUE_LOCATIONS if user_loc.lower() in loc.lower()]
 
 # 3. THE SMART SEARCH PIPELINE
-def smart_search_with_file(file_path, additional_query="", NER_applied=True, LLM_applied=True):
+def smart_search_with_file(resume_text, additional_query="", NER_applied=True, LLM_applied=True):
     """
     Run the smart search pipeline on a resume file plus an optional free-text query.
     Returns a tuple of (results_dict_or_None, intent_dict).
     """
-    # STEP A: Extract Resume Text
-    print(f"Processing: {os.path.basename(file_path)}")
-    print(additional_query)
-    resume_text = extract_text_from_file(file_path)
 
-    # STEP B: Get Intent via Groq
+    # STEP A: Get Intent via Groq
     # We pass both the resume (for skills) and query (for specific filters)
     combined_input = f"RESUME: {resume_text[:2000]}\nUSER PREFERENCES: {additional_query}"
     intent = get_filter_json(combined_input)
     print(f"Extracted Intent: {intent}")
 
-    # STEP C: Build Chroma Filter using Cache
+    # STEP B: Build Chroma Filter using Cache
     where_clauses = []
 
     # Standard exact filters
@@ -67,19 +63,19 @@ def smart_search_with_file(file_path, additional_query="", NER_applied=True, LLM
     elif len(where_clauses) == 1:
         final_where = where_clauses[0]
 
-    # STEP D: Build the "Rich Query" (The Booster Logic)
+    # STEP C: Build the "Rich Query" (The Booster Logic)
     # 1. Start with the basic title or user query
     base_query = intent.get("title") or additional_query or ""
     
     boost_parts = [base_query]
 
-    # 2. Add LLM Semantic Summary (High Level Reasoning)
+    # STEP D: Add LLM Semantic Summary (High Level Reasoning)
     if LLM_applied:
         llm_query = get_search_query_llm(resume_text, additional_query)
         boost_parts.append(llm_query)
         print(f"🤖 LLM Boost: {llm_query}")
 
-    # 3. Add NER Tags (Granular Keywords)
+    # Add NER Tags (Granular Keywords)
     if NER_applied:
         ner_output = parse_resume_ner(resume_text)
         # Extract and clean tags longer than 2 chars
@@ -98,7 +94,7 @@ def smart_search_with_file(file_path, additional_query="", NER_applied=True, LLM
         where=final_where,
     )
 
-    # STEP E: Output Results (for debugging / CLI use)
+    # STEP F: Output Results (for debugging / CLI use)
     print(f"\n{'='*60}\n🔍 MATCHES FOR YOUR PROFILE\n{'='*60}")
     if not results["ids"][0]:
         print("No matches found with these filters. Try broader criteria.")
@@ -128,6 +124,6 @@ def smart_search_with_file(file_path, additional_query="", NER_applied=True, LLM
 # 4. OPTIONAL: CLI TEST ENTRYPOINT
 if __name__ == "__main__":
     # Example: Pass a PDF/Doc and a specific location constraint
-    test_file = r"C:\Vasanth\Important stuff\Resumes\Vasanth Subramanian Resume.pdf"
+    test_file = extract_text_from_file(r"C:\Vasanth\Important stuff\Resumes\Vasanth Subramanian Resume.pdf")
     smart_search_with_file(test_file, "Software Engineer in New York", NER_applied=False, LLM_applied=False)
     smart_search_with_file(test_file, "Software Engineer in New York", NER_applied=True, LLM_applied=True)
