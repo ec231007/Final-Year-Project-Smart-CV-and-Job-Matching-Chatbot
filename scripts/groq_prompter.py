@@ -12,6 +12,11 @@ VALID_WORK_TYPES = ["FULL_TIME", "CONTRACT", "PART_TIME", "TEMPORARY", "INTERNSH
 def get_filter_json(user_prompt):
     system_prompt = f"""
     You are a Search Intent Extractor. Extract filters from the user's request.
+
+    RULES:
+    1. Extract multiple values if the user implies a range (e.g., "Junior or Mid-level").
+    2. Only use values from the provided HARD CATEGORIES.
+    3. Return lists for experience and work_type, even if there is only one value, Could have multiple values.
     
     HARD CATEGORIES (Must match one of these or be null):
     - experience: {VALID_EXPERIENCE}
@@ -20,10 +25,10 @@ def get_filter_json(user_prompt):
     FUZZY CATEGORIES (Extract the name/term the user mentioned):
     - location (e.g., "NYC", "London", "Remote")
     - title (e.g., "Python Developer")
-    - company (e.g., "Google")
 
-    Return ONLY JSON. If a filter is not mentioned, use null.
-    Example: "Junior dev in New York" -> {{"experience": "Entry level", "location": "New York", "title": "dev"}}
+    Return ONLY JSON. 
+    Example: "Internships or entry level dev roles in London" 
+    -> {{"experience": ["Entry level", "Internship"], "work_type": ["INTERNSHIP", "Full Time"], "location": "London", "title": "dev"}}
     """
     
     response = client.chat.completions.create(
