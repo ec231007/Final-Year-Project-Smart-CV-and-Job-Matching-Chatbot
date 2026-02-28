@@ -35,6 +35,10 @@ def smart_search_with_file(resume_text, additional_query="", NER_applied=True, L
     Returns a tuple of (results_dict_or_None, intent_dict).
     """
 
+    print(f"Resume Text: {resume_text[:500]}") # Debug: Show the start of the resume text
+    print(f"Additional Query: {additional_query}") # Debug: Show the additional query   
+    print(f"NER Applied: {NER_applied}, LLM Applied: {LLM_applied}") # Debug: Show which features are applied
+
     # STEP A: Get Intent via Groq
     # We pass both the resume (for skills) and query (for specific filters)
     combined_input = f"RESUME: {resume_text[:2000]}\nUSER PREFERENCES: {additional_query}"
@@ -42,26 +46,46 @@ def smart_search_with_file(resume_text, additional_query="", NER_applied=True, L
     print(f"Extracted Intent: {intent}")
 
     # STEP B: Build Chroma Filter using Cache
-    where_clauses = []
+    final_where = {}
+    filter_parts = []
 
-    # Standard exact filters
-    if intent.get("experience"):
-        where_clauses.append({"experience": intent["experience"]})
-    if intent.get("work_type"):
-        where_clauses.append({"work_type": intent["work_type"]})
+    # 1. Handle Experience (Multi-select)
+    exp = intent.get("experience")
+    if exp:
+        # If it's a list (even with 1 item), use $in
+        if isinstance(exp, list) and len(exp) > 0:
+            filter_parts.append({"experience": {"$in": exp}})
+        # If it's just a single string, you can use direct match or wrap it
+        elif isinstance(exp, str):
+            filter_parts.append({"experience": exp})
 
-    # Fuzzy Location Expansion (Matches user "NYC" to "New York, NY" from cache)
-    if intent.get("location"):
-        loc_variations = get_fuzzy_locations(intent["location"])
-        if loc_variations:
-            where_clauses.append({"location": {"$in": loc_variations}})
+    # 2. Handle Work Type (Multi-select)
+    wt = intent.get("work_type")
+    if wt:
+        if isinstance(wt, list) and len(wt) > 0:
+            filter_parts.append({"work_type": {"$in": wt}})
+        elif isinstance(wt, str):
+            filter_parts.append({"work_type": wt})
 
-    # Combine into final 'where' dict
+    # 3. Handle Location (Fuzzy/String)
+    raw_loc = intent.get("location")
+    if raw_loc:
+        # try match with locations in db
+        matched_db_locations = get_fuzzy_locations(raw_loc)
+        print(f"📍 Fuzzy Match: '{raw_loc}' mapped to {matched_db_locations}")
+    
+    if matched_db_locations:
+        filter_parts.append({"location": {"$in": matched_db_locations}})
+    else:
+        # If no match found in DB, don't add a hard filter (it would return 0)
+        print(f"⚠️ No exact DB match for {raw_loc}. Moving to semantic search.")
+
+    # Combine parts into final_where
     final_where = None
-    if len(where_clauses) > 1:
-        final_where = {"$and": where_clauses}
-    elif len(where_clauses) == 1:
-        final_where = where_clauses[0]
+    if len(filter_parts) > 1:
+        final_where = {"$and": filter_parts}
+    elif len(filter_parts) == 1:
+        final_where = filter_parts[0]
 
     # STEP C: Build the "Rich Query" (The Booster Logic)
     # 1. Start with the basic title or user query
