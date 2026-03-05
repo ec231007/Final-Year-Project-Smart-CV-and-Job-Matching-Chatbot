@@ -74,13 +74,20 @@ def smart_search_with_file(resume_text, additional_query="", NER_applied=True, L
     if intent.get("work_type"):
         filter_parts.append({"work_type": {"$in": intent["work_type"]}})
 
-    # Add Location Filter
+    raw_locs = intent.get("location")
     matched_db_locations = []
-    raw_loc = intent.get("location")
-    if raw_loc:
-        # try match with locations in db
-        matched_db_locations = get_fuzzy_locations(raw_loc)
-        print(f"📍 Fuzzy Match: '{raw_loc}' mapped to {matched_db_locations}")
+
+    if raw_locs:
+        # Handle both single string (from AI) and list (from UI)
+        if isinstance(raw_locs, str):
+            raw_locs = [raw_locs]
+        
+        for loc in raw_locs:
+            matches = get_fuzzy_locations(loc)
+            matched_db_locations.extend(matches)
+
+    # Remove duplicates from the expanded list
+    matched_db_locations = list(set(matched_db_locations))
     
     if matched_db_locations:
         filter_parts.append({"location": {"$in": matched_db_locations}})
@@ -141,6 +148,13 @@ def smart_search_with_file(resume_text, additional_query="", NER_applied=True, L
         print(f"[{i+1}] {meta['title'].upper()} @ {meta['company']}")
         print(f"    📍 {meta['location']} | {meta['work_type']} | Match: {score}%")
         print(f"    📝 {results['documents'][0][i][:160]}...\n")
+
+    for key in ["location", "experience", "work_type"]:
+        val = intent.get(key, [])
+        if isinstance(val, str):
+            intent[key] = [val] if val else []
+        elif val is None:
+            intent[key] = []
 
     search_context = {
         "intent": intent,

@@ -1,8 +1,96 @@
 import streamlit as st
 import os
+import json
 from search_script import smart_search_with_file
 from career_agent import get_chatbot_response
 from resume_parser_util import extract_text_from_file
+
+# 0. SETUP PATHS & LOAD CACHE
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+CACHE_PATH = os.path.join(SCRIPT_DIR, "metadata_cache.json")
+
+@st.cache_data # Cache this so we don't reload the JSON on every click
+def load_metadata():
+    if os.path.exists(CACHE_PATH):
+        with open(CACHE_PATH, "r") as f:
+            data = json.load(f)
+            return data.get("locations", [])
+    return []
+
+UNIQUE_LOCATIONS = load_metadata()
+
+# --- 1. SESSION STATE ---
+# This "basket" holds our actual selected locations
+if "loc_basket" not in st.session_state:
+    st.session_state.loc_basket = []
+
+# --- 2. THE CUSTOM COMPONENT ---
+def location_multiselect_custom():
+    st.subheader("Location")
+    
+    # CSS for the 'Pills' (Selected Tags)
+    st.markdown("""
+        <style>
+        .pills-container { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px; }
+        .pill { 
+            background-color: #e0e0e0; border-radius: 15px; padding: 2px 10px; 
+            font-size: 0.8rem; display: flex; align-items: center; 
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
+    if isinstance(st.session_state.loc_basket, str):
+        st.session_state.loc_basket = [st.session_state.loc_basket]
+
+    # 1. Render the 'Basket' as Pills
+    if st.session_state.loc_basket:
+        # We use a container to show the tags visually
+        # Since Streamlit buttons can't easily sit inside a flexbox, 
+        # we'll use a clean list with individual "X" buttons in a better layout
+        cols = st.columns([0.9, 0.1])
+        for loc in st.session_state.loc_basket:
+            with st.container(border=True):
+                c1, c2 = st.columns([0.8, 0.2])
+                c1.text(loc)
+                if c2.button("✖", key=f"del_{loc}", help=f"Remove {loc}"):
+                    st.session_state.loc_basket.remove(loc)
+                    st.rerun()
+    
+    # 2. The Popover (The "Dropdown" from your image)
+    with st.popover("Add Locations...", use_container_width=True):
+        search_term = st.text_input("Search", placeholder="Type to filter...", label_visibility="collapsed", key="loc_search_input")
+        
+        # Filter logic
+        display_list = UNIQUE_LOCATIONS
+        if search_term:
+            display_list = [l for l in UNIQUE_LOCATIONS if search_term.lower() in l.lower()]
+        
+        # Scrollable area
+        st.markdown('<div style="max-height: 250px; overflow-y: auto; padding: 5px;">', unsafe_allow_html=True)
+        
+        # Checkbox loop
+        for loc in display_list[:50]:
+            # This is the key: value= is driven by the basket
+            # If the AI adds it to the basket, the checkbox will be checked automatically
+            checked = st.checkbox(
+                loc, 
+                value=(loc in st.session_state.loc_basket), 
+                key=f"chk_{loc}"
+            )
+            
+            # Update basket based on checkbox click
+            if checked and loc not in st.session_state.loc_basket:
+                st.session_state.loc_basket.append(loc)
+                st.rerun()
+            elif not checked and loc in st.session_state.loc_basket:
+                st.session_state.loc_basket.remove(loc)
+                st.rerun()
+                
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        if st.button("Clear All", use_container_width=True):
+            st.session_state.loc_basket = []
+            st.rerun()
 
 # 1. PAGE CONFIG
 st.set_page_config(page_title="Smart CV Matcher", layout="wide")
@@ -42,7 +130,7 @@ for key in ["filter_location", "filter_exp", "filter_type"]:
         st.session_state[key] = [] if "exp" in key or "type" in key else ""
 
 # Widget keys (to avoid the modification error, we ensure they exist)
-if "loc_widget" not in st.session_state: st.session_state.loc_widget = ""
+if "loc_basket" not in st.session_state: st.session_state.loc_basket = []
 if "exp_widget" not in st.session_state: st.session_state.exp_widget = []
 if "type_widget" not in st.session_state: st.session_state.type_widget = []
 
@@ -52,7 +140,7 @@ ner_on = st.session_state.get("ner_toggle", True)
 llm_on = st.session_state.get("llm_toggle", True)
 
 manual_filters = {
-        "location": st.session_state.loc_widget,
+        "location": st.session_state.loc_basket,
         "experience": st.session_state.exp_widget,
         "work_type": [REVERSE_WORK_TYPE_MAP.get(t, t) for t in st.session_state.type_widget]
     }
@@ -79,7 +167,7 @@ if prompt := st.chat_input("Ask me to find jobs, or chat about your career..."):
         elif is_search_mode:
             # --- PREPARE FILTERS ---
             current_manual_filters = {
-                "location": st.session_state.get("loc_widget", ""),
+                "location": st.session_state.get("loc_basket", []),
                 "experience": st.session_state.get("exp_widget", []),
                 "work_type": [REVERSE_WORK_TYPE_MAP.get(t, t) for t in st.session_state.get("type_widget", [])]
             }
@@ -105,7 +193,12 @@ if prompt := st.chat_input("Ask me to find jobs, or chat about your career..."):
                 # This is where we update the global state. 
                 # Because we call st.rerun() at the end, the sidebar will redraw with these
                 if "location" in intent:
-                    st.session_state.loc_widget = intent["location"]
+                    new_locs = intent["location"]
+                    if isinstance(new_locs, str): new_locs = [new_locs]
+    
+                    # Merge AI findings with existing UI selections (remove duplicates)
+                    combined = list(set(st.session_state.loc_basket + new_locs))
+                    st.session_state.loc_basket = combined
                 
                 raw_exp = intent.get("experience", [])
                 st.session_state.exp_widget = [raw_exp] if isinstance(raw_exp, str) else raw_exp
@@ -117,7 +210,7 @@ if prompt := st.chat_input("Ask me to find jobs, or chat about your career..."):
                 # Format Display
                 if results and results.get("ids") and results["ids"][0]:
                     intent_title = context.get("title", "relevant roles")
-                    intent_loc = st.session_state.loc_widget if st.session_state.loc_widget else "your area"
+                    intent_loc = st.session_state.loc_basket if st.session_state.loc_basket else "your area"
                     
                     header_msg = f"I've found some **{intent_title}** in **{intent_loc}** that match your profile:"
                     st.markdown(header_msg)
@@ -205,7 +298,7 @@ with st.sidebar:
     st.header("Manual Preferences")
 
     # If the Search Logic updates these keys, the sidebar "refreshes" automatically.
-    st.text_input("Preferred Location", key="loc_widget")
+    location_multiselect_custom()
     st.multiselect("Experience Level", options=VALID_EXPERIENCE, key="exp_widget")
     st.multiselect("Work Type", options=list(WORK_TYPE_MAP.values()), key="type_widget")
     
@@ -227,19 +320,6 @@ st.markdown(
     "Upload your resume and chat with the assistant to discover roles that best match your profile. "
     "You can ask for specific jobs or ask for career advice based on your matches."
 )
-# --- FLOATING MODE SELECTOR ---
-# Create a container that stays at the bottom of the results but above the input
-ui_container = st.container()
-
-with ui_container:
-    cols = st.columns([1, 3])
-    with cols[0]:
-        st.toggle("🔍 **Search Mode**", value=True, key="mode_toggle", help="Switch between searching jobs and career advice.")
-    
-    if is_search_mode:
-        st.caption("✨ Assistant will **search for jobs**.")
-    else:
-        st.caption("💬 Assistant is in **Career Coach** mode.")
 
 # 6. DISPLAY CHAT HISTORY
 for message in st.session_state.messages:
@@ -258,5 +338,19 @@ for message in st.session_state.messages:
                     with st.expander(f"🎯 {job['title']} @ {job['company']}"):
                         st.write(f"**Location:** {job['location']} | **Type:** {job['work_type']}")
                         st.write(job['snippet'])
+
+# --- FLOATING MODE SELECTOR ---
+# Create a container that stays at the bottom of the results but above the input
+ui_container = st.container()
+
+with ui_container:
+    cols = st.columns([1, 3])
+    with cols[0]:
+        st.toggle("🔍 **Search Mode**", value=True, key="mode_toggle", help="Switch between searching jobs and career advice.")
+    
+    if is_search_mode:
+        st.caption("✨ Assistant will **search for jobs**.")
+    else:
+        st.caption("💬 Assistant is in **Career Coach** mode.")
 
 # to run: python -m streamlit run scripts/app.py
