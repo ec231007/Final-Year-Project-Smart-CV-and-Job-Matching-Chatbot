@@ -51,6 +51,12 @@ is_search_mode = st.session_state.get("mode_toggle", True)
 ner_on = st.session_state.get("ner_toggle", True)
 llm_on = st.session_state.get("llm_toggle", True)
 
+manual_filters = {
+        "location": st.session_state.loc_widget,
+        "experience": st.session_state.exp_widget,
+        "work_type": [REVERSE_WORK_TYPE_MAP.get(t, t) for t in st.session_state.type_widget]
+    }
+
 # 3. Processing Logic: We have two main pathways: Search Mode and Chatbot Mode. The toggle determines which one we take when the user submits a message.
 if prompt := st.chat_input("Ask me to find jobs, or chat about your career..."):
     
@@ -71,6 +77,13 @@ if prompt := st.chat_input("Ask me to find jobs, or chat about your career..."):
         
         # 3. EXECUTION LOGIC: Based strictly on the toggle
         elif is_search_mode:
+            # --- PREPARE FILTERS ---
+            current_manual_filters = {
+                "location": st.session_state.get("loc_widget", ""),
+                "experience": st.session_state.get("exp_widget", []),
+                "work_type": [REVERSE_WORK_TYPE_MAP.get(t, t) for t in st.session_state.get("type_widget", [])]
+            }
+
             # --- SEARCH PATHWAY ---
             with st.spinner("Analyzing CV and searching roles..."):                
                 # Execute Search Pipeline
@@ -78,7 +91,8 @@ if prompt := st.chat_input("Ask me to find jobs, or chat about your career..."):
                     resume_text, 
                     prompt, 
                     NER_applied=ner_on, 
-                    LLM_applied=llm_on
+                    LLM_applied=llm_on,
+                    manual_filters=manual_filters
                 )
                 
                 # Store results in state so the chatbot can "see" them later

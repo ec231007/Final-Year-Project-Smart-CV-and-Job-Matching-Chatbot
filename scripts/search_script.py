@@ -29,7 +29,7 @@ def get_fuzzy_locations(user_loc):
     return [loc for loc in UNIQUE_LOCATIONS if user_loc.lower() in loc.lower()]
 
 # 3. THE SMART SEARCH PIPELINE
-def smart_search_with_file(resume_text, additional_query="", NER_applied=True, LLM_applied=True):
+def smart_search_with_file(resume_text, additional_query="", NER_applied=True, LLM_applied=True, manual_filters=None):
     """
     Run the smart search pipeline on a resume file plus an optional free-text query.
     Returns a tuple of (results_dict_or_None, intent_dict).
@@ -45,29 +45,37 @@ def smart_search_with_file(resume_text, additional_query="", NER_applied=True, L
     intent = get_filter_json(combined_input)
     print(f"Extracted Intent: {intent}")
 
+    if manual_filters:
+        for field in ["experience", "work_type"]:
+            # Combine UI selections with AI findings
+            manual_vals = manual_filters.get(field, [])
+            ai_vals = intent.get(field, [])
+            
+            # Ensure both are lists
+            if isinstance(manual_vals, str): manual_vals = [manual_vals]
+            if isinstance(ai_vals, str): ai_vals = [ai_vals]
+            
+            # Union of both sets (removes duplicates)
+            intent[field] = list(set(manual_vals + ai_vals))
+        
+        # Location: Prioritize manual if AI didn't find one in the text
+        if not intent.get("location") and manual_filters.get("location"):
+            intent["location"] = manual_filters["location"]
+
     # STEP B: Build Chroma Filter using Cache
     final_where = {}
     filter_parts = []
 
-    # 1. Handle Experience (Multi-select)
-    exp = intent.get("experience")
-    if exp:
-        # If it's a list (even with 1 item), use $in
-        if isinstance(exp, list) and len(exp) > 0:
-            filter_parts.append({"experience": {"$in": exp}})
-        # If it's just a single string, you can use direct match or wrap it
-        elif isinstance(exp, str):
-            filter_parts.append({"experience": exp})
+    # Add Experience Filter
+    if intent.get("experience"):
+        filter_parts.append({"experience": {"$in": intent["experience"]}})
 
-    # 2. Handle Work Type (Multi-select)
-    wt = intent.get("work_type")
-    if wt:
-        if isinstance(wt, list) and len(wt) > 0:
-            filter_parts.append({"work_type": {"$in": wt}})
-        elif isinstance(wt, str):
-            filter_parts.append({"work_type": wt})
+    # Add Work Type Filter
+    if intent.get("work_type"):
+        filter_parts.append({"work_type": {"$in": intent["work_type"]}})
 
-    # 3. Handle Location (Fuzzy/String)
+    # Add Location Filter
+    matched_db_locations = []
     raw_loc = intent.get("location")
     if raw_loc:
         # try match with locations in db
@@ -80,6 +88,7 @@ def smart_search_with_file(resume_text, additional_query="", NER_applied=True, L
         # If no match found in DB, don't add a hard filter (it would return 0)
         print(f"⚠️ No exact DB match for {raw_loc}. Moving to semantic search.")
 
+    print(f"🔎 Chroma Filter Parts: {filter_parts}") # Debug: Show the filter parts before combining
     # Combine parts into final_where
     final_where = None
     if len(filter_parts) > 1:
