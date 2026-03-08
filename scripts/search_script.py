@@ -42,7 +42,7 @@ def smart_search_with_file(resume_text, additional_query="", NER_applied=True, L
     # STEP A: Get Intent via Groq
     # We pass both the resume (for skills) and query (for specific filters)
     combined_input = f"RESUME: {resume_text[:2000]}\nUSER PREFERENCES: {additional_query}"
-    intent = get_filter_json(combined_input)
+    intent, _ = get_filter_json(combined_input)
     print(f"Extracted Intent: {intent}")
 
     if manual_filters:
@@ -111,7 +111,7 @@ def smart_search_with_file(resume_text, additional_query="", NER_applied=True, L
 
     # STEP D: Add LLM Semantic Summary (High Level Reasoning)
     if LLM_applied:
-        llm_query = get_search_query_llm(resume_text, additional_query)
+        llm_query, _ = get_search_query_llm(resume_text, additional_query)
         boost_parts.append(llm_query)
         print(f"🤖 LLM Boost: {llm_query}")
 

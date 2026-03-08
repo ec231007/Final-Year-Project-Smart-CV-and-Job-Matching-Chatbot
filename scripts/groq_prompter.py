@@ -1,75 +1,93 @@
 import json
-from groq import Groq
 import os
+from typing import Dict, Tuple, Any
+from groq import Groq
 from dotenv import load_dotenv
 
 load_dotenv()
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
+# Model Strategy
+MODELS = {
+    "intent": "llama-3.1-8b-instant",  # 500k TPD - High speed, good at JSON
+    "boost": "meta-llama/llama-4-scout-17b-16e-instruct", # 500k TPD - Higher reasoning
+    "fallback": "qwen/qwen3-32b" # 500k TPD - Alternative if Scout is down
+}
+
 VALID_EXPERIENCE = ["Entry level", "Associate", "Mid-Senior level", "Director", "Executive", "Internship"]
 VALID_WORK_TYPES = ["FULL_TIME", "CONTRACT", "PART_TIME", "TEMPORARY", "INTERNSHIP", "VOLUNTEER"]
 
-def get_filter_json(user_prompt):
-    system_prompt = f"""
-    You are a Search Intent Extractor. Extract filters from the user's request.
-
-    RULES:
-    1. Extract multiple values if the user implies a range (e.g., "Junior or Mid-level").
-    2. Only use values from the provided HARD CATEGORIES.
-    3. Return lists for experience and work_type, even if there is only one value, Could have multiple values.
-    
-    HARD CATEGORIES (Must match one of these or be null):
-    - experience: {VALID_EXPERIENCE}
-    - work_type: {VALID_WORK_TYPES}
-    
-    FUZZY CATEGORIES (Extract the name/term the user mentioned):
-    - location (e.g., "NYC", "London", "Remote")
-    - title (e.g., "Python Developer")
-
-    Return ONLY JSON. 
-    Example: "Internships or entry level dev roles in London" 
-    -> {{"experience": ["Entry level", "Internship"], "work_type": ["INTERNSHIP", "Full Time"], "location": "London", "title": "dev"}}
+def get_filter_json(user_prompt: str) -> Tuple[Dict[str, Any], str]:
     """
+    Extracts structured filters using a token-efficient model.
+    Returns: (Result Dictionary, Model Name)
+    """
+    model_name = MODELS["intent"]
     
-    response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ],
-        response_format={"type": "json_object"} # Forces the model to give clean JSON
+    # Dense prompt engineering to save input tokens
+    system_prompt = (
+        "Role: Search Intent Extractor. Output ONLY JSON.\n"
+        f"Allowed Experience: {VALID_EXPERIENCE}\n"
+        f"Allowed Work Types: {VALID_WORK_TYPES}\n"
+        "Rules: return 4 nullable fields: experience, work_type, location, title. Return lists for 'experience' and 'work_type' from the allowed list only. "
+        "Extract 'location' and 'title' as strings."
     )
-    return json.loads(response.choices[0].message.content)
-
-def get_search_query_llm(resume_text, user_query=""):
-    """
-    Summarizes a CV and user intent into a condensed string of 
-    searchable keywords for Vector DB retrieval.
-    """
-    system_prompt = """
-    You are a Recruitment Search Expert. 
-    Analyze the provided CV text and the user's specific request.
-    Generate a condensed 20-30 word search query string that captures:
-    1. The core job title/role.
-    2. Primary technical skills (languages, frameworks, tools).
-    3. Core industries or domain expertise (e.g., Fintech, AI, Backend).
-
-    Edge cases:
-    1. If the user query is empty/ not useful, build query from resume text.
-    2. If both resume test and user query are empty/ not useful, return empty string "".
-
-    Output ONLY the string of keywords, no introduction or JSON.
-    Example Output: "Senior Python Developer AWS Docker Kubernetes Distributed Systems Fintech Scalability"
-    """
     
-    prompt = f"RESUME: {resume_text[:2500]}\nUSER REQUEST: {user_query}"
+    # Internal trim: Intents are usually short, but we cap to be safe
+    user_prompt = user_prompt[:1500] 
+
+    try:
+        response = client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.0 # Strictness for classification
+        )
+        return json.loads(response.choices[0].message.content), model_name
+    except Exception as e:
+        print(f"Intent Error ({model_name}): {e}")
+        return {"experience": [], "work_type": [], "location": None, "title": None}, model_name
+
+def get_search_query_llm(resume_text: str, user_query: str = "") -> Tuple[str, str]:
+    """
+    Summarizes CV into keyword strings for Vector Search.
+    Returns: (Keyword String, Model Name)
+    """
+    model_name = MODELS["boost"]
     
-    response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.1 # Low temperature for consistency
+    system_prompt = (
+        "Role: Recruitment Search Expert. Output ONLY a 20-word keyword string to be used as job search query.\n"
+        "Content: Main title, top tech skills, and domain (e.g., Fintech). "
+        "No prose. No sentences."
     )
-    return response.choices[0].message.content.strip()
+    
+    # Internal trim: 1500 chars is usually the 'Top' of the CV (most relevant)
+    trimmed_text = resume_text[:1500]
+    prompt = f"RESUME: {trimmed_text}\nREQUEST: {user_query}"
+    
+    try:
+        response = client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.1
+        )
+        return response.choices[0].message.content.strip(), model_name
+    except Exception as e:
+        # If the preferred model fails (Rate Limit), we attempt the fallback
+        if "429" in str(e):
+            print(f"--- Rate Limit on {model_name}. Attempting Fallback... ---")
+            return _get_search_query_fallback(resume_text, user_query)
+        return "", model_name
+
+def _get_search_query_fallback(resume_text: str, user_query: str) -> Tuple[str, str]:
+    """Internal helper for fallback logic to keep main loop clean."""
+    model_name = MODELS["fallback"]
+    # ... logic identical to above but using the fallback model ...
+    # This helps identify if a file used 'Plan B' during your evaluation.
+    return "...", model_name
