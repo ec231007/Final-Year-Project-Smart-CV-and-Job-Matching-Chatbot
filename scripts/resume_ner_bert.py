@@ -9,6 +9,7 @@ Output: {"roles": [], "skills": [], "education": [], "locations": []}
 """
 
 import re
+import torch
 from typing import Dict, List
 from transformers import pipeline
 from resume_parser_util import extract_text_from_file
@@ -18,14 +19,23 @@ _ner_pipeline = None
 
 RESUME_NER_MODEL = "yashpwr/resume-ner-bert-v2"
 
+# Singleton
 def _get_pipeline():
+    global _ner_pipeline
+    if _ner_pipeline is None:
+        print(f"--- Initializing NER Model: {RESUME_NER_MODEL} ---")
+        # Check for GPU (device 0) otherwise use CPU (-1)
+        device = 0 if torch.cuda.is_available() else -1
+        
+        # We keep "first" as it handles this specific model's subwords best
+        _ner_pipeline = pipeline(
+            "token-classification",
+            model=RESUME_NER_MODEL,
+            aggregation_strategy="first", 
+            device=device
+        )
     # 'simple' is often too basic; 'first' or 'max' handles subwords better for this model
-    return pipeline(
-        "token-classification",
-        model=RESUME_NER_MODEL,
-        aggregation_strategy="first", 
-        device=-1
-    )
+    return _ner_pipeline
 
 def _clean_text(text: str) -> str:
     """Fixes BERT subword fragments and cleans common junk."""
@@ -70,10 +80,17 @@ def parse_resume_ner_bert(resume_text: str) -> Dict[str, List[str]]:
             
             if not key or len(word) < 2: continue
 
-            # Quality Control: Filter out full sentences misclassified as skills
-            if key == "skills":
-                if len(word.split()) > 3: continue # Skills are usually 1-3 words
-                if any(char in word for char in ['.', '!', '?']): continue
+            # Filtering noise
+            word_count = len(word.split())
+            
+            # 1. Length Check: Skills/Roles can be long, but rarely > 6 words.
+            # (e.g., "Senior Lead Full Stack Developer" = 5 words)
+            if word_count > 6: continue 
+            
+            # 2. Punctuation Check: Real tags rarely contain sentence-ending punctuation.
+            # We allow internal punctuation (e.g., "React.js" or "U.S.A")
+            if any(punct in word for punct in ['!', '?', ';']): continue
+            if word.endswith('.') and word_count > 2: continue
             
             collected[key].append(word)
 
@@ -83,7 +100,6 @@ def parse_resume_ner_bert(resume_text: str) -> Dict[str, List[str]]:
 
 def parse_resume_file_bert(file_path: str, **kwargs) -> Dict[str, List[str]]:
     """Load resume from file (PDF/DOCX), extract text, run BERT NER."""
-    from resume_parser_util import extract_text_from_file
     text = extract_text_from_file(file_path)
     return parse_resume_ner_bert(text, **kwargs)
 
