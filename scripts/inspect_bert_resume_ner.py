@@ -8,6 +8,7 @@ Usage: python scripts/inspect_bert_resume_ner.py
 """
 
 from collections import defaultdict
+from resume_ner_bert import parse_resume_ner_bert
 
 SAMPLE = """
 John Doe

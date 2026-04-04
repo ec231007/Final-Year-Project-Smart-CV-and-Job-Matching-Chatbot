@@ -22,3 +22,6 @@ for col in cols_to_profile:
     for val, count in counts.items():
         print(f"[{count:>5}] {val}")
     print("\n" + "="*40 + "\n")
+
+from search_script import get_fuzzy_locations
+print(get_fuzzy_locations("new york"))

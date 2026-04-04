@@ -93,7 +93,7 @@ def smart_search_with_file(resume_text, additional_query="", NER_applied=True, L
         filter_parts.append({"location": {"$in": matched_db_locations}})
     else:
         # If no match found in DB, don't add a hard filter (it would return 0)
-        print(f"⚠️ No exact DB match for {raw_loc}. Moving to semantic search.")
+        print(f"⚠️ No exact DB match for {raw_locs}. Moving to semantic search.")
 
     print(f"🔎 Chroma Filter Parts: {filter_parts}") # Debug: Show the filter parts before combining
     # Combine parts into final_where
