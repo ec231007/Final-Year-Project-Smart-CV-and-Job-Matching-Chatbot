@@ -9,6 +9,7 @@ Usage: python scripts/inspect_bert_resume_ner.py
 
 from collections import defaultdict
 from resume_ner_bert import parse_resume_ner_bert
+from scripts.resume_parser_util import extract_text_from_file
 
 SAMPLE = """
 John Doe
@@ -28,7 +29,6 @@ Education
 Bachelor of Science in Computer Science 2016
 State University — Boston, MA
 """
-
 
 def main():
     from transformers import pipeline
@@ -109,6 +109,11 @@ def main():
         print(f"\n  {label}:")
         for v in vals:
             print(f"    - {v!r}")
+
+    print("Current NER model output:")
+    result = parse_resume_ner_bert(text)
+    for k, v in result.items():
+        print(f"  {k}: {v}")
 
 
 if __name__ == "__main__":

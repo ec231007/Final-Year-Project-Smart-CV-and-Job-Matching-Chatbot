@@ -4,7 +4,7 @@ import chromadb
 from chromadb.utils import embedding_functions
 from groq_prompter import get_filter_json, get_search_query_llm
 from resume_parser_util import extract_text_from_file
-from resume_ner_bert import parse_resume_ner_bert as parse_resume_ner
+from resume_ner_bert_v2 import parse_resume_ner_bert as parse_resume_ner
 
 # 1. SETUP PATHS & CONFIG
 DB_PATH = "data/job_vector_db"
@@ -130,7 +130,7 @@ def smart_search_with_file(resume_text, additional_query="", NER_applied=True, L
     # STEP E: Query Database
     results = collection.query(
         query_texts=[rich_query],
-        n_results=5,
+        n_results=20, # to allow for "show more" on frontend
         where=final_where,
     )
 
