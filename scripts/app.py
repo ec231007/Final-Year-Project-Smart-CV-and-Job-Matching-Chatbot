@@ -123,6 +123,13 @@ if "last_results" not in st.session_state:
     st.session_state.last_results = None
 if "last_context" not in st.session_state:
     st.session_state.last_context = {}
+if "search_buffer" not in st.session_state:
+    st.session_state.search_buffer = [] # Stores results 6-20 of the LATEST search
+
+def trim_history():
+    """Keeps only the last 5 messages in the session state."""
+    if len(st.session_state.messages) > 5:
+        st.session_state.messages = st.session_state.messages[-5:]
 
 # Logic for initializing filters
 for key in ["filter_location", "filter_exp", "filter_type"]:
@@ -215,8 +222,8 @@ if prompt := st.chat_input("Ask me to find jobs, or chat about your career..."):
                     header_msg = f"I've found some **{intent_title}** in **{intent_loc}** that match your profile:"
                     st.markdown(header_msg)
                     
-                    # PREPARE DATA FOR HISTORY: We extract exactly what we need for the UI
-                    results_to_store = []
+                    # Process all results into job objects
+                    all_found_jobs = []
                     for i in range(len(results["ids"][0])):
                         meta = results["metadatas"][0][i]
                         # Use the map to show "Full-time" instead of "FULL_TIME"
@@ -229,25 +236,26 @@ if prompt := st.chat_input("Ask me to find jobs, or chat about your career..."):
                             "work_type": display_wt,
                             "snippet": results["documents"][0][i][:400] + "..."
                         }
-                        results_to_store.append(job_data)
-                        
-                        # Display the card immediately
-                        with st.expander(f"🎯 {job_data['title']} @ {job_data['company']}"):
-                            st.write(f"**Location:** {job_data['location']} | **Type:** {job_data['work_type']}")
-                            st.write(job_data['snippet'])
+                        all_found_jobs.append(job_data)
                     
-                    # Append as a 'search_results' type
+                    # NEW LOGIC: Split results
+                    # Only the first 5 are "visible" to the UI and the RAG Chatbot
+                    visible_now = all_found_jobs[:5]
+                    # The rest are stored in a hidden buffer for "Show More"
+                    st.session_state.search_buffer = all_found_jobs[5:]
+
+                    # Append to messages (RAG will only see 'visible_now')
                     st.session_state.messages.append({
                         "role": "assistant", 
                         "content": header_msg, 
                         "type": "search_results",
-                        "results_data": results_to_store
+                        "results_data": visible_now
                     })
                 else:
-                    error_msg = "I couldn't find strong matches for that specific query. Try broadening your terms!"
+                    error_msg = "I couldn't find strong matches. Try broadening your terms!"
                     st.warning(error_msg)
                     st.session_state.messages.append({"role": "assistant", "content": error_msg, "type": "text"})
-        
+            trim_history()
         else:
             # --- CHATBOT PATHWAY ---
             with st.spinner("Thinking..."):
@@ -260,6 +268,7 @@ if prompt := st.chat_input("Ask me to find jobs, or chat about your career..."):
                 st.markdown(ai_response)
                 # Append as a standard 'text' type
                 st.session_state.messages.append({"role": "assistant", "content": ai_response, "type": "text"})
+            trim_history()
 
     # Trigger a rerun to lock the state and keep UI synced
     print(f"DEBUG: Saved to State -> {st.session_state.last_context.get('intent')}")
@@ -322,7 +331,7 @@ st.markdown(
 )
 
 # 6. DISPLAY CHAT HISTORY
-for message in st.session_state.messages:
+for idx, message in enumerate(st.session_state.messages):
     with st.chat_message(message["role"]):
         # Handle standard text messages (User or AI Coach)
         if message.get("type") == "text" or "type" not in message:
@@ -338,7 +347,17 @@ for message in st.session_state.messages:
                     with st.expander(f"🎯 {job['title']} @ {job['company']}"):
                         st.write(f"**Location:** {job['location']} | **Type:** {job['work_type']}")
                         st.write(job['snippet'])
-
+            
+            # --- SHOW MORE BUTTON ---
+            # Only show if this is the last message and we have a buffer
+            is_latest = (idx == len(st.session_state.messages) - 1)
+            if is_latest and st.session_state.get("search_buffer"):
+                if st.button(f"Show 5 more results ({len(st.session_state.search_buffer)} left)", key=f"more_btn_{idx}"):
+                    next_five = st.session_state.search_buffer[:5]
+                    st.session_state.search_buffer = st.session_state.search_buffer[5:]
+                    message["results_data"].extend(next_five)
+                    st.rerun()
+                    
 # --- FLOATING MODE SELECTOR ---
 # Create a container that stays at the bottom of the results but above the input
 ui_container = st.container()
