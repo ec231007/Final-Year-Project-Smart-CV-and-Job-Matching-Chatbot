@@ -1,0 +1,89 @@
+import json
+import os
+import sys
+from pathlib import Path
+from tqdm import tqdm
+from eval_search import run_eval_search 
+
+# --- PATHS ---
+SCRIPT_DIR = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = SCRIPT_DIR.parent
+INPUT_FILE = PROJECT_ROOT / "data" / "processed_eval_data_v2.json"
+OUTPUT_FILE = PROJECT_ROOT / "data" / "raw_retrieval_results_v2.json"
+
+def run_v2_mass_retrieval():
+    # 1. Load the enriched data (v2)
+    if not os.path.exists(INPUT_FILE):
+        print(f"❌ Error: {INPUT_FILE} not found. Run the enrichment script first.")
+        return
+
+    with open(INPUT_FILE, "r") as f:
+        dataset = json.load(f)
+
+    # 2. Checkpoint Logic
+    mass_results = []
+    done_filenames = set()
+    if os.path.exists(OUTPUT_FILE):
+        with open(OUTPUT_FILE, "r") as f:
+            try:
+                mass_results = json.load(f)
+                done_filenames = {res["filename"] for res in mass_results}
+                print(f"⏩ Resuming: {len(done_filenames)} CVs already processed for V2.")
+            except:
+                print("⚠️ Output file corrupt. Starting fresh.")
+
+    # 3. Targeted Configs: Only the ones involving NER
+    # (NER_applied, LLM_applied)
+    v2_configs = [
+        (True, False),  # New NER Only
+        (True, True)    # New Hybrid (NER v2 + LLM Boost)
+    ]
+
+    print(f"🚀 Running retrieval for {len(dataset)} CVs using Improved NER v2...")
+
+    for entry in tqdm(dataset, desc="🔍 Retrieval V2"):
+        fname = entry["filename"]
+        if fname in done_filenames:
+            continue
+
+        # CRITICAL STEP: 
+        # Temporarily inject the improved tags into the field 'run_eval_search' expects
+        if "ner_tags_v2" in entry:
+            entry["ner_tags"] = entry["ner_tags_v2"]
+
+        cv_eval_node = {
+            "filename": fname,
+            "ground_truth": entry["ground_truth_cat"],
+            "model_version": "v2_improved",
+            "eval_runs": []
+        }
+
+        try:
+            for ner_toggle, llm_toggle in v2_configs:
+                # This calls your search logic (ChromaDB + BM25)
+                run_data = run_eval_search(entry, NER_applied=ner_toggle, LLM_applied=llm_toggle)
+                cv_eval_node["eval_runs"].append(run_data)
+            
+            mass_results.append(cv_eval_node)
+
+            # Auto-save every 5 CVs
+            if len(mass_results) % 5 == 0:
+                with open(OUTPUT_FILE, "w") as f:
+                    json.dump(mass_results, f, indent=4)
+                    
+        except Exception as e:
+            print(f"\n❌ Error on {fname}: {e}")
+            # Save progress before exiting
+            with open(OUTPUT_FILE, "w") as f:
+                json.dump(mass_results, f, indent=4)
+            return 
+
+    # Final Save
+    with open(OUTPUT_FILE, "w") as f:
+        json.dump(mass_results, f, indent=4)
+    
+    print(f"\n✅ V2 Retrieval complete! Total processed: {len(mass_results)}")
+    print(f"💾 Results saved to: {OUTPUT_FILE}")
+
+if __name__ == "__main__":
+    run_v2_mass_retrieval()
