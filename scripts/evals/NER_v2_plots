@@ -1,0 +1,130 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import os
+from pathlib import Path
+
+# Create output directory for V2 plots
+output_dir = "fyp_plots_v2"
+if not os.path.exists(output_dir):
+    os.makedirs(output_dir)
+
+SCRIPT_DIR = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = SCRIPT_DIR.parent
+
+# ---------------------------------------------------------
+# 1. LOAD AND MERGE DATA
+# ---------------------------------------------------------
+print("Loading datasets...")
+try:
+    df_v1 = pd.read_csv(PROJECT_ROOT / 'data' / 'retrieval_metrics_balanced.csv')
+    df_v2 = pd.read_csv(PROJECT_ROOT / 'data' / 'retrieval_metrics_balanced_v2.csv')
+    print("Files loaded successfully.")
+except FileNotFoundError as e:
+    print(f"Error: {e}. Ensure both v1 and v2 CSV files are in the data directory.")
+    exit()
+
+# Map configurations to readable labels
+def map_v1(c):
+    if c == 'NER:False_LLM:False': return '1. Baseline'
+    if c == 'NER:False_LLM:True': return '2. LLM Only'
+    if c == 'NER:True_LLM:False': return '3. NER v1 Only'
+    if c == 'NER:True_LLM:True': return '4. Hybrid v1'
+    return c
+
+def map_v2(c):
+    if c == 'NER:True_LLM:False': return '5. NER v2 Only'
+    if c == 'NER:True_LLM:True': return '6. Hybrid v2'
+    return c
+
+df_v1['plot_config'] = df_v1['config'].apply(map_v1)
+df_v2['plot_config'] = df_v2['config'].apply(map_v2)
+
+# Create a combined dataframe with all 6 configurations
+df_combined = pd.concat([df_v1, df_v2], ignore_index=True)
+
+# Create a strict comparison dataframe (just V1 vs V2 for NER and Hybrid)
+df_comparison = df_combined[df_combined['plot_config'].str.contains('v1|v2')].copy()
+df_comparison['Version'] = df_comparison['plot_config'].apply(lambda x: 'V2 (New)' if 'v2' in x else 'V1 (Old)')
+df_comparison['Strategy'] = df_comparison['plot_config'].apply(lambda x: 'Hybrid (NER + LLM)' if 'Hybrid' in x else 'NER Only')
+
+sns.set_theme(style="whitegrid")
+
+# ---------------------------------------------------------
+# SECTION 1: THE NEW COMPARISON PLOTS (V1 vs V2)
+# ---------------------------------------------------------
+
+# 1. Direct Head-to-Head MRR Comparison
+plt.figure(figsize=(10, 6))
+sns.barplot(x='Strategy', y='mrr', hue='Version', data=df_comparison, palette=['#e74c3c', '#2ecc71'])
+plt.title('NEW 1: MRR Improvement (Old NER vs New NER)')
+plt.ylabel('Mean Reciprocal Rank (MRR)')
+plt.savefig(f"{output_dir}/new_1_mrr_v1_vs_v2.png", bbox_inches='tight')
+
+# 2. Hit@K Head-to-Head
+hit_comp = df_comparison.groupby(['Strategy', 'Version'])[['hit_at_1', 'hit_at_5']].mean().reset_index()
+hit_comp_melted = hit_comp.melt(id_vars=['Strategy', 'Version'], var_name='Metric', value_name='Rate')
+plt.figure(figsize=(12, 6))
+g = sns.catplot(x='Metric', y='Rate', hue='Version', col='Strategy', data=hit_comp_melted, kind='bar', palette='viridis', height=5, aspect=1)
+g.fig.suptitle('NEW 2: Hit@1 and Hit@5 Lift (V1 vs V2)', y=1.05)
+plt.savefig(f"{output_dir}/new_2_hit_k_v1_vs_v2.png", bbox_inches='tight')
+
+# 3. MRR Category Delta (How much did V2 improve per category?)
+# Calculate the MRR delta between Hybrid V2 and Hybrid V1
+pivot_compare = df_comparison[df_comparison['Strategy'] == 'Hybrid (NER + LLM)'].pivot_table(index='category', columns='Version', values='mrr', aggfunc='mean')
+pivot_compare['Delta'] = pivot_compare['V2 (New)'] - pivot_compare['V1 (Old)']
+pivot_compare = pivot_compare.sort_values('Delta', ascending=False)
+
+plt.figure(figsize=(12, 6))
+colors = ['#2ecc71' if x > 0 else '#e74c3c' for x in pivot_compare['Delta']]
+pivot_compare['Delta'].plot(kind='bar', color=colors)
+plt.title('NEW 3: Category MRR Delta (Hybrid V2 - Hybrid V1)')
+plt.ylabel('MRR Improvement')
+plt.axhline(0, color='black', linewidth=1)
+plt.savefig(f"{output_dir}/new_3_category_delta.png", bbox_inches='tight')
+
+# 4. Search Scope: Did V2 retrieve more or fewer jobs?
+plt.figure(figsize=(8, 6))
+sns.boxplot(x='Strategy', y='count_retrieved', hue='Version', data=df_comparison)
+plt.title('NEW 4: Retrieval Volume (Did the better NER expand or focus the search?)')
+plt.savefig(f"{output_dir}/new_4_retrieval_volume.png", bbox_inches='tight')
+
+# ---------------------------------------------------------
+# SECTION 2: UPDATED CORE PLOTS (ALL 6 CONFIGS)
+# ---------------------------------------------------------
+# Sort configurations so they appear in logical order (1 to 6)
+config_order = sorted(df_combined['plot_config'].unique())
+
+# 5. Global Accuracy (Hit@K) by Configuration (Updated)
+hit_k = df_combined.groupby('plot_config')[['hit_at_1', 'hit_at_5']].mean().reset_index()
+hit_k_melted = hit_k.melt(id_vars='plot_config', var_name='Metric', value_name='Rate')
+plt.figure(figsize=(14, 6))
+sns.barplot(x='plot_config', y='Rate', hue='Metric', data=hit_k_melted, order=config_order, palette='mako')
+plt.title('UPDATED 5: Hit@K Comparison Across ALL 6 Pipeline Toggles')
+plt.xticks(rotation=20)
+plt.savefig(f"{output_dir}/updated_5_hit_k_all.png", bbox_inches='tight')
+
+# 6. Overall MRR (Updated)
+plt.figure(figsize=(12, 6))
+sns.barplot(x='plot_config', y='mrr', data=df_combined, order=config_order, palette='magma')
+plt.title('UPDATED 6: Mean Reciprocal Rank (MRR) - Full Pipeline Evolution')
+plt.xticks(rotation=20)
+plt.savefig(f"{output_dir}/updated_6_mrr_all.png", bbox_inches='tight')
+
+# 7. Heatmap: Performance Matrix (Updated)
+pivot_mrr_all = df_combined.pivot_table(index='category', columns='plot_config', values='mrr', aggfunc='mean')
+pivot_mrr_all = pivot_mrr_all[config_order] # Reorder columns
+plt.figure(figsize=(14, 10))
+sns.heatmap(pivot_mrr_all, annot=True, cmap='YlGnBu', fmt=".2f")
+plt.title('UPDATED 7: MRR Heatmap (Category vs All Configurations)')
+plt.savefig(f"{output_dir}/updated_7_mrr_heatmap_all.png", bbox_inches='tight')
+
+# 8. Precision (In-Category Ratio)
+plt.figure(figsize=(12, 6))
+sns.barplot(x='plot_config', y='in_cat_ratio', data=df_combined, order=config_order, palette='coolwarm')
+plt.title('UPDATED 8: Precision - Ratio of Relevant Jobs in Top 10 Results')
+plt.xticks(rotation=20)
+plt.savefig(f"{output_dir}/updated_8_precision.png", bbox_inches='tight')
+
+print(f"✅ Success! All V2 plots have been generated and saved in the '{output_dir}' directory.")
