@@ -1,22 +1,55 @@
 from groq import Groq
 import os
 from dotenv import load_dotenv
+from career_agent_tools import query_career_advice_db
+import json
 
 load_dotenv()
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
+# Define the tools for the LLM
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "query_career_advice_db",
+            "description": "Search a database of real-world job descriptions to find specific skills, requirements, and trends for a job title or sector.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string", 
+                        "description": "The specific skills or topics to research (e.g. 'React and Typescript' or 'management methodologies')"
+                    },
+                    "job_title": {
+                        "type": "string", 
+                        "description": "The target job title (e.g. 'Software Engineer'). Helps narrow the search."
+                    },
+                    "experience_level": {
+                        "type": "string", 
+                        "options": "Optional: 'Entry level', 'Mid-Senior level', 'Associate', 'Director', 'Executive'",
+                        "description": "Used to filter by job experience level. If unsure select all that are applicabale instead of leaving them blank"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    }
+]
+
 SYSTEM_PROMPT = """
 You are an expert Career Assistant and Recruitment System Guide. 
 You have access to the internal 'Search Pipeline' data of our app.
+You have access to a tool to query a database of real-world job descriptions to find out what employers are actually looking for in candidates.
 
 YOUR CAPABILITIES:
 1. Explain Results: Use the Job Titles and Descriptions to tell the user why they matched. Try to explain to user why the system behaved a certain way based on the NER tags and Intent you see. Also try to find positives and show why a result might be good, be looking at the metadata you have and that jobs description.
 
-
 2. Debug the Pipeline: If results are bad, look at the 'ner_tags' and 'intent'. 
    - If NER missed a skill (e.g. it didn't see 'Python'), tell the user: "Our NER parse missed the skill 'Python'. If you know Python, try adding it to the 'Additional Query' section so its included in teh search."
    - If the filters are too strict (e.g. Location), suggest changing the sidebar settings.
-3. Resume Advice: Suggest improvements to the resume to better match the 'llm_boost_query'.
+
+3. Resume Advice: Suggest improvements to the resume to better match the 'llm_boost_query'. If needed use the query_career_advice_db tool to find out what employers are looking for in the target job title and suggest adding those skills to the resume or additional query. You might not need to invoke the tool unless you deem it to be very necessary.
 
 When chatting with the user, try to be helpful, and when they are not satified guide them to change the following for better results:
     - NER Toggle: This turns on/off the keyword extraction from the resume. If off, the search relies more on the LLM summary and user query
@@ -33,53 +66,71 @@ GUIDELINES:
 4. Transparency: Explain that you can see their NER tags and LLM reasoning to help them refine their search.
 """
 
-def get_chatbot_response(user_message, chat_history, search_results, search_context):
-    """
-    Args:
-        user_message (str): The new message from the user.
-        chat_history (list): st.session_state.messages.
-        search_results (dict): The results from ChromaDB.
-        search_context (dict): The intermediate steps (NER tags, Intent, etc).
-    """
-    
-    # 1. Prepare Job Context
+def get_chatbot_response(user_message, chat_history, search_results=None, search_context=None):
+    # 1. Build the initial context
     job_summaries = ""
     if search_results and search_results.get("ids") and search_results["ids"][0]:
-        for i in range(len(search_results['ids'][0])):
+        for i in range(min(3, len(search_results['ids'][0]))):
             m = search_results['metadatas'][0][i]
-            job_summaries += f"- {m['title']} at {m['company']} (Location: {m['location']})\n"
-    else:
-        job_summaries = "No jobs currently found in the last search."
-
-    # 2. Build the Prompt with full state
+            job_summaries += f"- {m['title']} at {m['company']}\n"
+    
     state_injection = f"""
-    [PIPELINE_METADATA]
+    [SYSTEM_STATE]
     Intent: {search_context.get('intent')}
-    NER Keywords: {search_context.get('ner_tags')}
-    LLM Boost Reasoning: {search_context.get('llm_boost_query')}
-
-    [CURRENT_SEARCH_RESULTS]
-    {job_summaries}
+    NER: {search_context.get('ner_tags')}
+    Recent Matches: {job_summaries if job_summaries else "None"}
     """
 
-    # 3. Build message list for Groq
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    
-    # Add actual chat history for continuity
-    for msg in chat_history[-5:]: # Last 5 messages for context
-        messages.append({"role": msg["role"], "content": msg["content"]})
-    
-    # Add the current internal state and user message
-    messages.append({"role": "user", "content": f"{state_injection}\n\nUSER QUESTION: {user_message}"})
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": f"{state_injection}\n\nUSER QUESTION: {user_message}"}
+    ]
 
-    completion = client.chat.completions.create(
+    # 2. First LLM Pass (Checking for tool use)
+    response = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=messages,
-        temperature=0.7
+        tools=TOOLS,
+        tool_choice="auto"
     )
-    print(user_message)
-    print(chat_history)
-    print(search_results)
-    print(search_context)
     
-    return completion.choices[0].message.content
+    response_message = response.choices[0].message
+    tool_calls = response_message.tool_calls
+
+    # 3. If the LLM wants to use the tool
+    if tool_calls:
+        # Add the LLM's decision to the history
+        messages.append(response_message)
+        
+        for tool_call in tool_calls:
+            function_args = json.loads(tool_call.function.arguments)
+            
+            # --- THE ACTUAL TOOL EXECUTION ---
+            # This is where we call your career_agent_tools.py function
+            tool_results = query_career_advice_db(
+                query=function_args.get("query"),
+                job_title=function_args.get("job_title"),
+                experience_level=function_args.get("experience_level")
+            )
+            
+            # Format the snippets for the LLM
+            formatted_results = "RESEARCH FINDINGS FROM DATABASE:\n"
+            for res in tool_results:
+                formatted_results += f"- {res['job_title']} @ {res['company']}: {res['snippet']}\n\n"
+
+            # Add the results to the conversation
+            messages.append({
+                "tool_call_id": tool_call.id,
+                "role": "tool",
+                "name": "query_career_advice_db",
+                "content": formatted_results,
+            })
+
+        # 4. Final LLM Pass (Generating the answer with the data)
+        final_response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=messages
+        )
+        return final_response.choices[0].message.content, True # True = Tool was used
+    
+    return response_message.content, False # False = No tool used

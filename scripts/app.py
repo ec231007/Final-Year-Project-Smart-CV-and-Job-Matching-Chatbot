@@ -256,18 +256,27 @@ if prompt := st.chat_input("Ask me to find jobs, or chat about your career..."):
                     st.warning(error_msg)
                     st.session_state.messages.append({"role": "assistant", "content": error_msg, "type": "text"})
             trim_history()
-        else:
-            # --- CHATBOT PATHWAY ---
-            with st.spinner("Thinking..."):
-                ai_response = get_chatbot_response(
-                    prompt, 
-                    st.session_state.messages, 
-                    st.session_state.last_results, 
-                    st.session_state.last_context
-                )
-                st.markdown(ai_response)
-                # Append as a standard 'text' type
-                st.session_state.messages.append({"role": "assistant", "content": ai_response, "type": "text"})
+        # --- Advice Mode Logic ---
+        else:            
+            # Get AI Response with a "Thinking" status
+            with st.chat_message("assistant"):
+                with st.status("Consulting career database...", expanded=True) as status:
+                    st.write("Analyzing your request...")
+                    
+                    full_response, tool_used = get_chatbot_response(
+                        prompt, 
+                        st.session_state.messages,
+                        search_results=st.session_state.get("last_results"),
+                        search_context=st.session_state.get("last_context")
+                    )
+                    
+                    if tool_used:
+                        st.write("✅ Found relevant job trends. Synthesizing advice...")
+                    
+                    status.update(label="Advice ready!", state="complete", expanded=False)
+
+                st.markdown(full_response)
+                st.session_state.messages.append({"role": "assistant", "content": full_response})
             trim_history()
 
     # Trigger a rerun to lock the state and keep UI synced
@@ -357,7 +366,7 @@ for idx, message in enumerate(st.session_state.messages):
                     st.session_state.search_buffer = st.session_state.search_buffer[5:]
                     message["results_data"].extend(next_five)
                     st.rerun()
-                    
+
 # --- FLOATING MODE SELECTOR ---
 # Create a container that stays at the bottom of the results but above the input
 ui_container = st.container()
