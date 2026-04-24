@@ -31,6 +31,7 @@ def get_filter_json(user_prompt: str, model_override: str = None) -> Tuple[Dict[
         "Rules: return 4 nullable fields: experience, work_type, location, title. "
         "Return lists for 'experience' and 'work_type' from allowed list only."
         "If experience or work_type is not mentioned, return as many applicable [or the full lists]. As not having key catagories like 'FULL_TIME' or 'Mid-Senior level' can be stop results. For example, if no experience level is mentioned, return all experience levels. If no work type is mentioned, return all work types. Always return a location and title if mentioned, but if not mentioned, return null for those fields."
+        "If extracted experience is intership - and entry level as weel to broden search"
     )
 
     try:
