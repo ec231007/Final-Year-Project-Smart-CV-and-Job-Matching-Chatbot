@@ -64,6 +64,7 @@ GUIDELINES:
 2. Debugging: If no results were found, look at the filters and suggest broader criteria (e.g., 'Try changing from Remote to On-site').
 3. Conversation: Remember the previous messages in 'CHAT_HISTORY' to maintain a flow.
 4. Transparency: Explain that you can see their NER tags and LLM reasoning to help them refine their search.
+5. Relevancy: Base your answers on the metadata and tool results when available.
 """
 
 def get_chatbot_response(user_message, chat_history, search_results=None, search_context=None):
