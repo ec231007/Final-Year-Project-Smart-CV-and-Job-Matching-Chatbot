@@ -1,13 +1,31 @@
 import streamlit as st
 import os
 import json
-from search_script import smart_search_with_file
+from search_script import smart_search_with_file, collection
 from career_agent import get_chatbot_response
 from resume_parser_util import extract_text_from_file
+from resume_ner_bert_v2 import _get_pipeline
 
 # 0. SETUP PATHS & LOAD CACHE
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CACHE_PATH = os.path.join(SCRIPT_DIR, "metadata_cache.json")
+
+# --- WARMING UP MODELS TO REDUCE LATENCY---
+@st.cache_resource(show_spinner=False)
+def prewarm_models():
+    """Forces ML models to load into memory on app start instead of on first search."""
+    # 1. Wake up the NER pipeline
+    _get_pipeline()
+
+    # 2. Wake up ChromaDB and the Embedding Model by forcing a lightweight call
+    collection.count() 
+
+    return True
+
+# Run the warm-up once per server start.
+prewarm_models()
+# ----------------------------
+
 
 @st.cache_data # Cache this so we don't reload the JSON on every click
 def load_metadata():
