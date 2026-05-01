@@ -40,10 +40,10 @@ def smart_search_with_file(resume_text, additional_query="", NER_applied=True, L
     print(f"NER Applied: {NER_applied}, LLM Applied: {LLM_applied}") # Debug: Show which features are applied
 
     # STEP A: Get Intent via Groq
-    # We pass both the resume (for skills) and query (for specific filters)
-    combined_input = f"RESUME: {resume_text[:2000]}\nUSER PREFERENCES: {additional_query}"
-    intent, _ = get_filter_json(combined_input)
-    print(f"Extracted Intent: {intent}")
+    # We only pass the user's prompt here to avoid "Zombie Filters". 
+    # where resume text overwrites user filters.
+    intent, _ = get_filter_json(additional_query)
+    print(f"Extracted Intent from Prompt: {intent}")
 
     if manual_filters:
         for field in ["experience", "work_type"]:
@@ -89,9 +89,7 @@ def smart_search_with_file(resume_text, additional_query="", NER_applied=True, L
     # Remove duplicates from the expanded list
     matched_db_locations = list(set(matched_db_locations))
     
-    if matched_db_locations:
-        filter_parts.append({"location": {"$in": matched_db_locations}})
-    else:
+    if not matched_db_locations:
         # If no match found in DB, don't add a hard filter (it would return 0)
         print(f"⚠️ No exact DB match for {raw_locs}. Moving to semantic search.")
 
@@ -108,6 +106,12 @@ def smart_search_with_file(resume_text, additional_query="", NER_applied=True, L
     base_query = intent.get("title") or additional_query or ""
     
     boost_parts = [base_query]
+
+    # Adding matched locations to query boost to limit over filtering
+    if matched_db_locations:
+        loc_boost = " ".join(matched_db_locations)
+        boost_parts.append(loc_boost)
+        print(f"📍 Location Boost: {loc_boost}")
 
     # STEP D: Add LLM Semantic Summary (High Level Reasoning)
     if LLM_applied:

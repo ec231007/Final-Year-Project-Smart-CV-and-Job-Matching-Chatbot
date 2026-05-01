@@ -1,10 +1,11 @@
 import streamlit as st
 import os
 import json
-from search_script import smart_search_with_file, collection
+from search_script import smart_search_with_file, collection, get_fuzzy_locations
 from career_agent import get_chatbot_response
 from resume_parser_util import extract_text_from_file
 from resume_ner_bert_v2 import _get_pipeline
+from groq_prompter import get_filter_json
 
 # 0. SETUP PATHS & LOAD CACHE
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -230,7 +231,11 @@ if prompt := st.chat_input("Ask me to find jobs, or chat about your career..."):
                 
                 raw_type = intent.get("work_type", [])
                 if isinstance(raw_type, str): raw_type = [raw_type]
-                st.session_state.type_widget = [WORK_TYPE_MAP.get(t, t) for t in raw_type if t in WORK_TYPE_MAP]
+                st.session_state.type_widget = [
+                    WORK_TYPE_MAP.get(t, t) 
+                    for t in raw_type 
+                    if t in WORK_TYPE_MAP or t in WORK_TYPE_MAP.values()
+                ]
                 
                 # Format Display
                 if results and results.get("ids") and results["ids"][0]:
@@ -323,6 +328,40 @@ with st.sidebar:
                 text = extract_text_from_file(temp_path)
                 st.session_state.extracted_resume_text = text
                 st.session_state.current_file_name = uploaded_file.name
+
+                # Parsing intent from CV upload
+                st.write("Detecting profile preferences...")
+                initial_intent, _ = get_filter_json(f"RESUME: {text[:2000]}\nExtract base location, experience level, and work type.")
+                
+                # Safely pre-fill the UI widgets
+                if initial_intent.get("location"):
+                    raw_locs = initial_intent["location"]
+                    if isinstance(raw_locs, str): raw_locs = [raw_locs]
+                    
+                    matched_db_locations = []
+                    for loc in raw_locs:
+                        # Run the fuzzy match against the metadata_cache.json
+                        matches = get_fuzzy_locations(loc) 
+                        matched_db_locations.extend(matches)
+                    
+                    # Update the basket with DB-valid strings
+                    st.session_state.loc_basket = list(set(matched_db_locations))
+                
+                # 2. Experience level (direct match)
+                if initial_intent.get("experience"):
+                    exps = initial_intent["experience"]
+                    st.session_state.exp_widget = [exps] if isinstance(exps, str) else exps
+                    
+                # 3. Work type (with the value/key safety check)
+                if initial_intent.get("work_type"):
+                    wts = initial_intent["work_type"]
+                    if isinstance(wts, str): wts = [wts]
+                    st.session_state.type_widget = [
+                        WORK_TYPE_MAP.get(t, t) 
+                        for t in wts 
+                        if t in WORK_TYPE_MAP or t in WORK_TYPE_MAP.values()
+                    ]
+
                 if os.path.exists(temp_path):
                     os.remove(temp_path)
                 status.update(label="Resume Processed!", state="complete")
