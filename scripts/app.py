@@ -164,6 +164,7 @@ if "type_widget" not in st.session_state: st.session_state.type_widget = []
 is_search_mode = st.session_state.get("mode_toggle", True)
 ner_on = st.session_state.get("ner_toggle", True)
 llm_on = st.session_state.get("llm_toggle", True)
+loc_hard_filter_on = st.session_state.get("loc_hard_filter_toggle", False)
 
 manual_filters = {
         "location": st.session_state.loc_basket,
@@ -206,7 +207,8 @@ if prompt := st.chat_input("Ask me to find jobs, or chat about your career..."):
                     prompt, 
                     NER_applied=ner_on, 
                     LLM_applied=llm_on,
-                    manual_filters=manual_filters
+                    manual_filters=manual_filters,
+                    hard_location_filter=loc_hard_filter_on
                 )
                 
                 # Store results in state so the chatbot can "see" them later
@@ -382,6 +384,7 @@ with st.sidebar:
     with st.expander("AI Search Settings"):
         st.toggle("NER Keyword Extraction", value=True, key="ner_toggle")
         st.toggle("LLM Semantic Boosting", value=True, key="llm_toggle")
+        st.toggle("Strict Location Filter", value=False, key="loc_hard_filter_toggle", help="If enabled, hides jobs outside your exact locations. If disabled, prioritizes your locations but may show other matches.")
     
     if st.button("Clear Conversation", use_container_width=True):
         for key in ["messages", "last_results", "last_context", "filter_location", "filter_exp", "filter_type"]:

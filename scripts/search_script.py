@@ -29,7 +29,7 @@ def get_fuzzy_locations(user_loc):
     return [loc for loc in UNIQUE_LOCATIONS if user_loc.lower() in loc.lower()]
 
 # 3. THE SMART SEARCH PIPELINE
-def smart_search_with_file(resume_text, additional_query="", NER_applied=True, LLM_applied=True, manual_filters=None):
+def smart_search_with_file(resume_text, additional_query="", NER_applied=True, LLM_applied=True, manual_filters=None, hard_location_filter=False):
     """
     Run the smart search pipeline on a resume file plus an optional free-text query.
     Returns a tuple of (results_dict_or_None, intent_dict).
@@ -92,6 +92,11 @@ def smart_search_with_file(resume_text, additional_query="", NER_applied=True, L
     if not matched_db_locations:
         # If no match found in DB, don't add a hard filter (it would return 0)
         print(f"⚠️ No exact DB match for {raw_locs}. Moving to semantic search.")
+
+    # Add locations as hard filters if toggled
+    if hard_location_filter and matched_db_locations:
+        filter_parts.append({"location": {"$in": matched_db_locations}})
+        print(f"🔒 Hard Location Filter Applied: {matched_db_locations}")
 
     print(f"🔎 Chroma Filter Parts: {filter_parts}") # Debug: Show the filter parts before combining
     # Combine parts into final_where
