@@ -1,0 +1,6 @@
+scenario_type,tool_accuracy,faithfulness_score,relevance_score
+Tool_Advice_With_Context,1.0,4.0,5.0
+Tool_Advice_No_Context,1.0,4.714285714285714,5.0
+System_Doubt,0.7142857142857143,4.428571428571429,4.857142857142857
+Match_Explanation,0.5714285714285714,4.142857142857143,4.714285714285714
+General_Advice_No_Context,0.42857142857142855,4.714285714285714,5.0
